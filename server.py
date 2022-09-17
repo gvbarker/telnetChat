@@ -1,3 +1,4 @@
+from email.errors import HeaderMissingRequiredValue
 import socket
 import threading
 import select
@@ -12,6 +13,16 @@ def recAll(conn):
         endOfLine = received.find(b"\r\n")
         if(endOfLine != -1):
             return received[:endOfLine]
+
+def handleChatBacklog(log, last, conn):
+    if (log.queue[-1]!=last):
+                for i in log:
+                    if (log.queue[i]!=last):
+                        sendFlag==True
+                    if (msgLog.queue[i]!=last and sendFlag):
+                        conn.sendall(i)
+                    sendFlag=False
+                    
 
 def logShift(log, msg):
     if(not log.full()):
@@ -41,24 +52,32 @@ class serverRoom(threading.Thread):
         self.add = add
 
     def run(self):
-
         print(self.add + "joined")
         user = queryUsername(self.conn)
 
         threadLock.acquire()
         connections[self.conn] = (user,self.add)
-        logShift(msgLog, (user + b"has joined")) 
+        logShift(msgLog, (user + b" has joined"))
+        lastMessage = user + b" has joined"
         threadLock.release()
+
         while True:
-            if ()
+            handleChatBacklog(msgLog,lastMessage,self.conn)
+            lastMessage=msgLog.queue[-1]
             input = recAll(self.conn)
             if (input==b""):
+                threadLock.acquire()
                 print(self.add + "disconnected")
+                logShift(msgLog,(user + b" has departed."))
+                del connections[self.conn]
+                threadLock.release()
                 break
-
-
+            else:
+                threadLock.acquire()
+                logShift(msgLog, (user + b": " + input))
+                lastMessage = user + b": " + input
+                threadLock.release()
         self.conn.close()
-        self.conn.sendall(b"Goodbye " + user)
 
 
 HOSTADD = socket.gethostbyname(socket.gethostname())
