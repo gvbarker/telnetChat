@@ -1,4 +1,3 @@
-from email.errors import HeaderMissingRequiredValue
 import socket
 import threading
 import select
@@ -15,13 +14,18 @@ def recAll(conn):
             return received[:endOfLine]
 
 def handleChatBacklog(log, last, conn):
+    sendFlag = False
+    print(list(log.queue))
     if (log.queue[-1]!=last):
-                for i in log:
-                    if (log.queue[i]!=last):
-                        sendFlag==True
-                    if (msgLog.queue[i]!=last and sendFlag):
-                        conn.sendall(i)
-                    sendFlag=False
+        for i in log.queue:
+            if (i==last):
+                print("set the send flag")
+                sendFlag=True
+            if (sendFlag):
+                print("got in the sendflag")
+                print(i)
+                conn.sendall(i)
+                conn.sendall(b"\x0a\x0d")
                     
 
 def logShift(log, msg):
@@ -52,22 +56,22 @@ class serverRoom(threading.Thread):
         self.add = add
 
     def run(self):
-        print(self.add + "joined")
+        print(self.add[0] + " joined")
         user = queryUsername(self.conn)
-
         threadLock.acquire()
         connections[self.conn] = (user,self.add)
-        logShift(msgLog, (user + b" has joined"))
-        lastMessage = user + b" has joined"
+        logShift(msgLog, (b"Welcome, " + user))
+        lastMessage = b""
         threadLock.release()
 
         while True:
             handleChatBacklog(msgLog,lastMessage,self.conn)
             lastMessage=msgLog.queue[-1]
+            self.conn.send(b"Speak to the peanut gallery: ")
             input = recAll(self.conn)
             if (input==b""):
                 threadLock.acquire()
-                print(self.add + "disconnected")
+                print(self.add[0] + " disconnected")
                 logShift(msgLog,(user + b" has departed."))
                 del connections[self.conn]
                 threadLock.release()
@@ -87,9 +91,10 @@ lSock.bind((HOSTADD, HOSTPORT))
 lSock.listen(True)
 connections = {}
 msgLog = Queue(maxsize=10)
+msgLog.put(b"")
 threadLock = threading.Lock()
+lastMessage = b""
 
 while True:
     newconn, newadd = lSock.accept()
-    print(newadd + " joined")
     serverRoom(newconn, newadd).start()
