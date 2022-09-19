@@ -3,6 +3,7 @@ import threading
 import select
 import errno
 from queue import Queue
+IPCONFIG='10.30.82.30 4444'
 def recAll(conn): 
     received = b""
     while True:
@@ -47,6 +48,32 @@ def queryUsername(conn):
                 continue
             return user
 
+def recThread(conn, user):
+    received = b""
+    naiveFlag = True
+    print("Made it")
+    while True:
+        if(naiveFlag):
+            conn.sendall(b"Preach your doctrine, Wise One: ")
+            naiveFlag=False
+        received += conn.recv(1024)
+        endOfLine = received.find(b"\r\n")
+        if(endOfLine != -1):
+            received=received[:endOfLine]
+            threadLock.acquire()
+            logShift(msgLog, (user + b": " + received))
+            threadLock.release()
+            received=b""
+            naiveFlag=True
+            continue
+        if (received==b""):
+            threadLock.acquire()
+            print(user + " disconnected")
+            logShift(msgLog,(user + b" has departed."))
+            del connections[conn]
+            threadLock.release()
+            return
+
 #extension of the threading class
 class serverRoom(threading.Thread):
 
@@ -63,24 +90,24 @@ class serverRoom(threading.Thread):
         logShift(msgLog, (b"Welcome, " + user))
         lastMessage = b""
         threadLock.release()
-
-        while True:
-            handleChatBacklog(msgLog,lastMessage,self.conn)
-            lastMessage=msgLog.queue[-1]
-            self.conn.send(b"Speak to the peanut gallery: ")
-            input = recAll(self.conn)
-            if (input==b""):
-                threadLock.acquire()
-                print(self.add[0] + " disconnected")
-                logShift(msgLog,(user + b" has departed."))
-                del connections[self.conn]
-                threadLock.release()
+        input = threading.Thread(target=recThread,args={self.conn,user})
+        input.run()
+        while True:            
+            if(self.conn not in connections):
                 break
-            else:
-                threadLock.acquire()
-                logShift(msgLog, (user + b": " + input))
-                lastMessage = user + b": " + input
-                threadLock.release()
+            sendFlag = False
+            if (msgLog.queue[-1]!=lastMessage):
+                for i in msgLog.queue:
+                    if (i==lastMessage):
+                        print("set the send flag")
+                        sendFlag=True
+                    if (sendFlag):
+                        print("got in the sendflag")
+                        print(i)
+                        self.conn.send(i)
+                        self.conn.sendall(b"\x0a\x0d")
+
+            lastMessage=msgLog.queue[-1]
         self.conn.close()
 
 
