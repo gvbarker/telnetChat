@@ -4,7 +4,6 @@ import select
 import errno
 import datetime
 from queue import Queue
-IPCONFIG='10.30.82.30 4444'
 def recAll(conn): 
     received = b""
     while True:
