@@ -20,7 +20,7 @@ def recAll(conn):
         if (received == b""):
             return b""
 
-        #backspace handling
+        #backspace handline
         while (received.find(b"\b") != -1):
             conn.send(b"\r")
             for i in range(len(received)):
@@ -149,29 +149,14 @@ def handleChatBacklog(conn, log, last):
     if (log[-1]!=last):
         for i in range(log.index(last), len(log)-1):
             conn.sendall(log[i][0])
-            conn.sendall(b"\x0a\x0d")
+            conn.sendall(b"\x0a\x0d\x0a\x0d")
 
 def tRecs(conn, user, log, lastMsg):
     received = b""
-    dFlag = True
+    dFlag = False
     msgReq = b"Preach it: "
     while True:
         bMsg = b""
-        if (dFlag):
-            conn.sendall(msgReq)
-            dFlag = False
-        
-        received += conn.recv(1024)
-        eol = received.find(b"\r\n")
-        
-        #disconnect check
-        if (received == b""):
-            print("disconnect")
-            tLock.acquire()
-            del connections[conn]
-            tLock.release()
-            return
-
         #chat updating
         if (lastMsg != log[-1]):
             print("updating")
@@ -183,8 +168,23 @@ def tRecs(conn, user, log, lastMsg):
             handleChatBacklog(conn,log, lastMsg)
             lastMsg = log[-1]
             conn.sendall(msgReq + received)
+            dFlag = False
 
+        if (dFlag):
+            conn.sendall(msgReq)
+            dFlag = False
         
+        received += conn.recv(1024)
+        eol = received.find(b"\r\n")
+        
+        #disconnect check
+        if (received == b""):
+            print("disconnect")
+            tLock.acquire()
+            del connections[user.upper()]
+            tLock.release()
+            return
+
         #backspace handling
         while (received.find(b"\b") != -1):
             print("backspace")
@@ -241,7 +241,7 @@ class client(threading.Thread):
         while True:
             if (user.upper() not in connections):
                 print(user + b" disconnect")
-                msgLog.append(user + b" has departed.", datetime.datetime.now())
+                msgLog.append((user + b" has departed.", datetime.datetime.now()))
                 break
         print("Closing ", self.add[0],"")
         self.conn.close()
