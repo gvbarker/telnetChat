@@ -109,8 +109,7 @@ class client(threading.Thread):
             for i in range(log.index(last)+1, len(log)):
                 conn.sendall(log[i][0])
                 conn.sendall(b"\r\n")
-
-
+ 
     def tRecs(self, conn, user, log, lastMsg):
         received = b""
         dFlag = False
@@ -218,10 +217,22 @@ class client(threading.Thread):
         
 
     def queryLogin(self, conn, logins, connections):
-        #! ADD THE ASCII HERE 
-        conn.sendall(b"Welcome to CyberBash!")
+        #entry-ascii art and welcome
+        bunchaspaces = b'                   '
+        fIn = open("ascii2.txt","r")
+        art=fIn.read()
+        art = art.split("\n")
+        conn.sendall(b'\r\n')
+        for i in art:
+            conn.sendall(bunchaspaces)
+            conn.sendall(bytes(i, 'utf-8'))
+            conn.send(b"\r\n")
+        conn.sendall(b'\r\n')
+        conn.sendall(b"Welcome to <Bash>!")
         resp = b""
         #! ADD THE ANSI CHECK/VALIDATION HERE
+        conn.send(b'\x07')
+        #conn.sendall(b"\xff\xfa\x18\x")
         while True:
             conn.sendall(b"Do you have an active login? (Y/N/EXIT to close connection):\r\n")
             resp = self.recAll(conn,1)
