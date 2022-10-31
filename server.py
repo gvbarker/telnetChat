@@ -9,10 +9,9 @@ TODO: ADD ANSI FLAIR
 TODO: FIGURE OUT THE MS TELNET ISSUES WITH ECHO SUPPRESSION
 TODO: IMPLEMENT DIRECT MESSAGING SYSTEM
 """
-#10.30.82.129
        
 class client(threading.Thread):
-    def __init__(self, conn, add):
+    def __init__(self, conn, add, connections, logins, msgLog):
         threading.Thread.__init__(self)
         self.conn, self.add = conn, add
 
@@ -20,7 +19,7 @@ class client(threading.Thread):
         while True:
             conn.sendall(b"Please enter your login information or EXIT to cancel.\r\n")
             conn.sendall(b"USER:\r\n")
-            resp = self.recAll(conn)
+            resp = self.recAll(conn,1)
 
             #disconnect check
             if (resp==b""):
@@ -37,9 +36,8 @@ class client(threading.Thread):
 
             #account exists 
             if (resp.upper() in logins):
-                #conn.sendall(b"PASS:\r\n\xff\xfb\x01")
                 conn.sendall(b"PASS:\r\n")
-                resp2 = self.recAll(conn)
+                resp2 = self.recAll(conn,0)
                 print(resp2)
                 resp2 = resp2.replace(b"\xFF\xFd\x01", b"")
                 print(resp2)
@@ -62,7 +60,7 @@ class client(threading.Thread):
     def generateLogin(self, conn, logins, connections):
         while True:
             conn.sendall(b"Please enter a username of fewer than 16 characters or EXIT to cancel.\r\n")
-            user = self.recAll(conn)
+            user = self.recAll(conn,1)
 
             #disconnect check
             if (user == b""):
@@ -80,19 +78,24 @@ class client(threading.Thread):
 
             while True:
                 conn.sendall(b"Please enter a case-sensitive password, and remember it!\r\nThere won't be any hints!\r\n")
-                pword = self.recAll(conn).replace(b"\xFF\xFD\x01", b"")
+                pword = self.recAll(conn,0)
                 
                 #disconnect check
                 if (pword == b""):
                     return pword
-                
+
+                pword = self.filterComms(pword)
+
                 conn.sendall(b"Please re-enter your password for confirmation.\r\n")
-                conf = self.recAll(conn).replace(b"\xFF\xFD\x01", b"")
-                
+
+                conf = self.recAll(conn,0)
+
                 #disconnect check
                 if (conf == b""):
                     return conf
                 
+                conf = self.filterComms(conf)
+
                 #validation
                 if (conf != pword):
                     conn.sendall(b"Passwords do not match.\r\n")
@@ -102,10 +105,10 @@ class client(threading.Thread):
                 return user
     
     def handleChatBacklog(self, conn, log, last):
-        if (log[-1]!=last):
-            for i in range(log.index(last), len(log)-1):
+        if (last != log[-1]):
+            for i in range(log.index(last)+1, len(log)):
                 conn.sendall(log[i][0])
-                conn.sendall(b"\x0a\x0d\x0a\x0d")
+                conn.sendall(b"\r\n")
 
 
     def tRecs(self, conn, user, log, lastMsg):
@@ -114,6 +117,8 @@ class client(threading.Thread):
         msgReq = b"Preach it: "
         while True:
             bMsg = b""
+            print(lastMsg[0])
+            print(log)
             #chat updating
             if (lastMsg != log[-1]):
                 print("updating")
@@ -131,7 +136,8 @@ class client(threading.Thread):
                 conn.sendall(msgReq)
                 dFlag = False
             
-            received += conn.recv(1024)
+            lastChar = conn.recv(1024)
+            received += lastChar
             eol = received.find(b"\r\n")
             
             #disconnect check
@@ -152,10 +158,15 @@ class client(threading.Thread):
                 received = received[:len(received)-2]
                 conn.send(b"\r")
                 conn.sendall(msgReq +  received)
+ 
 
             #send handling
             if (eol != -1):
                 print("sending")
+                for i in range(len(received) + len(msgReq) + 30):
+                    bMsg += b" "
+                print(len(bMsg), len(msgReq), len(received))
+                conn.sendall(bMsg)
                 received=received[:eol]
                 tLock.acquire()
                 log.append((user + b": " + received, datetime.datetime.now()))
@@ -163,19 +174,28 @@ class client(threading.Thread):
                 received = b""
                 dFlag = True
                 #! ADD TERMINAL COMMANDS HERE
+                continue
+            conn.send(lastChar)
     
-    def recAll(self, conn): 
+    def recAll(self, conn, echo): 
         received = b""
         while True:
+            
             #line storage
-            received += conn.recv(1024)
+            lastChar = conn.recv(1024)
+            received += lastChar
 
             #disconnect check
             if (received == b""):
                 return b""
 
-            #backspace handline
+            received = self.filterComms(received)
+
+            #backspace handling
             while (received.find(b"\b") != -1):
+                if(len(received) == 1):
+                    received = received[:0]
+                    break
                 conn.send(b"\r")
                 for i in range(len(received)):
                     conn.sendall(b" ")
@@ -185,8 +205,17 @@ class client(threading.Thread):
 
             #enter-key found
             if(received.find(b"\r\n") != -1):
+                conn.send(b"\r\n")
                 return received[:received.find(b"\r\n")]
+            if(echo):
+                conn.send(lastChar)
 
+    def filterComms(self, bstr):
+        commands=[b"\xff\xfb\x01",b"\xff\xfd\x01",b"\xff\xfe", b"\xff\xfc",b'\xff\xfb',b'\xff\xfd',b'\xff']
+        for i in commands:
+            bstr = bstr.replace(i,b"")
+        return bstr
+        
 
     def queryLogin(self, conn, logins, connections):
         #! ADD THE ASCII HERE 
@@ -194,32 +223,40 @@ class client(threading.Thread):
         resp = b""
         #! ADD THE ANSI CHECK/VALIDATION HERE
         while True:
-            conn.sendall(b"Do you have an active login? (Y/N):\r\n")
-            resp = self.recAll(conn)
+            conn.sendall(b"Do you have an active login? (Y/N/EXIT to close connection):\r\n")
+            resp = self.recAll(conn,1)
+            print(resp)
 
             #disconnect check
             if (resp==b""):
                 return b""
 
+            resp = resp.upper()
+
             #validation
-            if (resp.upper() != b"Y" and resp.upper() != b"N"):
+            if (resp != b"Y" and resp != b"N" and resp != b"EXIT"):
                 conn.sendall(b"Please enter (Y/N).\x0a\x0d")
                 continue
-            if (resp.upper() == b"Y"):
+            if (resp == b"Y"):
                 resp2 = self.login(conn, logins, connections)
                 if (resp2 == b"EXIT"):
                     continue
                 return resp2
-            if (resp.upper() == b"N"):
+            if (resp == b"N"):
                 resp2 = self.generateLogin(conn, logins, connections)
                 if (resp2 == b"EXIT"):
                     continue
                 return resp2
+            if (resp == b"EXIT"):
+                return b""
+            
     
 
     def run(self):
         print(self.add[0]," joined.")
+        self.conn.sendall(b'\xff\xfb\x01')
         user = self.queryLogin(self.conn, logins, connections)
+        print(user)
         
         #disconnect check
         if(user == b""):
@@ -227,17 +264,22 @@ class client(threading.Thread):
             print (self.add[0]," disconnected.")
             return
         
+        #add user to current connections
         tLock.acquire()
         connections[user.upper()]=self.conn
         tLock.release()
 
-        msgLog.append((b"Welcome, O " + user, datetime.datetime.now()))
-        lastMessage = (b"",startTime)
+        #add welcome message to log
+        welcome = (b"Welcome, O " + user, datetime.datetime.now())
+        msgLog.append(welcome)
+        lastMessage = msgLog[0]
 
 
+        #enable input
         input = threading.Thread(target=self.tRecs, args=(self.conn,user,msgLog, lastMessage))
         input.start()
         while True:
+            #check for disconnects
             if (user.upper() not in connections):
                 print(user + b" disconnect")
                 msgLog.append((user + b" has departed.", datetime.datetime.now()))
@@ -265,5 +307,5 @@ logins[b"T"] = b"t"
 tLock = threading.Lock()
 while True: 
     newconn, newadd = listener.accept()
-    client(newconn,newadd).start()
+    client(newconn,newadd, connections, logins, msgLog).start()
 
