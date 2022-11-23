@@ -1,4 +1,5 @@
 from collections import deque
+import re
 import socket
 import threading
 import datetime
@@ -14,6 +15,7 @@ class client(threading.Thread):
     def __init__(self, conn, add, connections, logins, msgLog):
         threading.Thread.__init__(self)
         self.conn, self.add = conn, add
+        self.ansiFlag=False
 
     def login(self, conn, logins, connections):
         while True:
@@ -38,13 +40,11 @@ class client(threading.Thread):
             if (resp.upper() in logins):
                 conn.sendall(b"PASS:\r\n")
                 resp2 = self.recAll(conn,0)
-                print(resp2)
                 resp2 = resp2.replace(b"\xFF\xFd\x01", b"")
-                print(resp2)
 
                 #validation
                 if (resp2 == logins[resp.upper()]):
-                    conn.sendall(b"Welcome, " + resp.upper())
+                    conn.sendall(b"You have successfully logged in.")
                     conn.sendall(b"\r\n")
                     connections[resp.upper()] = conn
                     return resp
@@ -104,30 +104,68 @@ class client(threading.Thread):
                 logins[user.upper()]=pword
                 return user
     
-    def handleChatBacklog(self, conn, log, last):
+    def handleChatBacklog(self, user, log, last, connections):
+        conn = connections[user.upper()]
+        currLast=last
         if (last != log[-1]):
             for i in range(log.index(last)+1, len(log)):
-                conn.sendall(log[i][0])
-                conn.sendall(b"\r\n")
+                currMsg = log[i][0]
+                processedMsg=currMsg
+                currLast = log[i]
+
+                #message parsing
+                firstNonAlpha = b'\W+'
+                nonAlpha = re.search(firstNonAlpha,currMsg).start()
+                strStart = currMsg[0:nonAlpha]
+                #direct message check and regex
+                dmRegex = re.compile(b'(/DM (\w+)/) (\w+)')
+                dmEx = dmRegex.search(currMsg)
+                #message is a welcome message
+                if(strStart==b"Welcome"):
+                    processedMsg = b'\x1b[31m' + currMsg + b'\x1b[0m'
+                    conn.sendall(processedMsg)
+                    conn.sendall(b"\r\n")
+                    continue
+                #message is a directed message
+                if(dmEx is not None):
+                    if(user == dmEx.group(2)):
+                        print(user, dmEx.group(2))
+                        processedMsg = b'\x1b[31m' + strStart + b'\x1b[0m' + b'\x1b[0m\x1b[33m'+currMsg[nonAlpha:]+b'\x1b[0m'
+                        conn.sendall(processedMsg)
+                        conn.sendall(b"\r\n")
+                        continue
+                    continue
+                #message is a user-sent message
+                if(strStart.upper() in connections and strStart==user):
+                    print(currMsg)
+                    processedMsg = b'\x1b[34m'+user+b'\x1b[0m\x1b[33m'+currMsg[nonAlpha:]+b'\x1b[0m'
+                    conn.sendall(processedMsg)
+                    conn.sendall(b"\r\n")
+                    continue
+                #message is a non user-sent message
+                if(strStart.upper() in connections and not strStart==user):
+                    print(currMsg)
+                    processedMsg = b'\x1b[32m'+strStart+b'\x1b[0m\x1b[33m'+currMsg[nonAlpha:]+b'\x1b[0m'
+                    conn.sendall(processedMsg)
+                    conn.sendall(b"\r\n")
+                    continue
+        return currLast
  
     def tRecs(self, conn, user, log, lastMsg):
+        arrowkeys=[b'\x1b[A',b'\x1b[B',b'\x1b[C',b'\x1b[D']
         received = b""
         dFlag = False
         msgReq = b"Preach it: "
         while True:
             bMsg = b""
-            print(lastMsg[0])
-            print(log)
             #chat updating
             if (lastMsg != log[-1]):
-                print("updating")
                 conn.send(b"\r")
-                for i in range(len(received) + len(msgReq)):
+                for i in range(len(received) + len(msgReq)+30):
                     bMsg+=b" "
                 conn.send(bMsg)
                 conn.send(b"\r")
-                self.handleChatBacklog(conn,log, lastMsg)
-                lastMsg = log[-1]
+                lastMsg = self.handleChatBacklog(user, log, lastMsg, connections)
                 conn.sendall(msgReq + received)
                 dFlag = False
 
@@ -136,7 +174,8 @@ class client(threading.Thread):
                 dFlag = False
             
             lastChar = conn.recv(1024)
-            received += lastChar
+            if(lastChar.isascii() and not lastChar in arrowkeys):
+                received += lastChar
             eol = received.find(b"\r\n")
             
             #disconnect check
@@ -149,22 +188,19 @@ class client(threading.Thread):
 
             #backspace handling
             while (received.find(b"\b") != -1):
-                print("backspace")
                 conn.send(b"\r")
                 for i in range(len(received) + len(msgReq) + 30):
                     bMsg+=b" "
                 conn.sendall(bMsg)
                 received = received[:len(received)-2]
                 conn.send(b"\r")
-                conn.sendall(msgReq +  received)
+                conn.sendall(msgReq +  received + b' ')
  
 
             #send handling
             if (eol != -1):
-                print("sending")
                 for i in range(len(received) + len(msgReq) + 30):
                     bMsg += b" "
-                print(len(bMsg), len(msgReq), len(received))
                 conn.sendall(bMsg)
                 received=received[:eol]
                 tLock.acquire()
@@ -172,9 +208,9 @@ class client(threading.Thread):
                 tLock.release()
                 received = b""
                 dFlag = True
-                #! ADD TERMINAL COMMANDS HERE
                 continue
-            conn.send(lastChar)
+            if(lastChar.isascii() and not lastChar in arrowkeys):
+                conn.send(lastChar)
     
     def recAll(self, conn, echo): 
         received = b""
@@ -200,7 +236,8 @@ class client(threading.Thread):
                     conn.sendall(b" ")
                 received = received[:len(received)-2]
                 conn.send(b"\r")
-                conn.sendall(received)
+                if(echo):
+                    conn.sendall(received)
 
             #enter-key found
             if(received.find(b"\r\n") != -1):
@@ -210,7 +247,7 @@ class client(threading.Thread):
                 conn.send(lastChar)
 
     def filterComms(self, bstr):
-        commands=[b"\xff\xfb\x01",b"\xff\xfd\x01",b"\xff\xfe", b"\xff\xfc",b'\xff\xfb',b'\xff\xfd',b'\xff']
+        commands=[b"\xff\xfb\x01",b"\xff\xfd\x01",b"\xff\xfe", b"\xff\xfc",b'\xff\xfb',b'\xff\xfd',b'\xff',b'\xfa',b'\xfb',b'\xfc',b'\x18',b'\xf0',b'\x00']
         for i in commands:
             bstr = bstr.replace(i,b"")
         return bstr
@@ -222,21 +259,36 @@ class client(threading.Thread):
         fIn = open("ascii2.txt","r")
         art=fIn.read()
         art = art.split("\n")
-        conn.sendall(b'\r\n')
+        conn.sendall(b'\r\n\x1b[31m')
         for i in art:
             conn.sendall(bunchaspaces)
             conn.sendall(bytes(i, 'utf-8'))
             conn.send(b"\r\n")
-        conn.sendall(b'\r\n')
+        conn.sendall(b'\r\n\x1b[0m')
         conn.sendall(b"Welcome to <Bash>!")
         resp = b""
-        #! ADD THE ANSI CHECK/VALIDATION HERE
-        conn.send(b'\x07')
-        #conn.sendall(b"\xff\xfa\x18\x")
+        #ansi terminal validation
+        if(not self.ansiFlag):
+            conn.sendall(b'You are not currently running an ANSI terminal interface.\r\n')
+            conn.sendall(b'You will not be able to get the most out of the server at this time.\r\n')
+            conn.sendall(b'Would you like to exit and switch now? (Y/N):\r\n')
+            resp=self.recAll(conn,1)
+            #disconnect check
+            if (resp==b""):
+                return b""
+            resp = resp.upper()
+            #validation
+            while True:
+                if (resp != b"Y" and resp != b"N"):
+                    conn.sendall(b"Please enter an appropriate response.\r\n")
+                    continue
+                if (resp == b"N"):
+                    break
+                if (resp == b"Y"):
+                    return b''
         while True:
             conn.sendall(b"Do you have an active login? (Y/N/EXIT to close connection):\r\n")
             resp = self.recAll(conn,1)
-            print(resp)
 
             #disconnect check
             if (resp==b""):
@@ -246,7 +298,7 @@ class client(threading.Thread):
 
             #validation
             if (resp != b"Y" and resp != b"N" and resp != b"EXIT"):
-                conn.sendall(b"Please enter (Y/N).\x0a\x0d")
+                conn.sendall(b"Please enter an appropriate response.\r\n")
                 continue
             if (resp == b"Y"):
                 resp2 = self.login(conn, logins, connections)
@@ -265,10 +317,14 @@ class client(threading.Thread):
 
     def run(self):
         print(self.add[0]," joined.")
+        self.conn.sendall(b'\xff\xfa\x18\x01\xff\xf0')
+        term = self.conn.recv(1024)
+        term = self.filterComms(term)
+        if (term == b'ANSI'):
+            self.ansiFlag=True
         self.conn.sendall(b'\xff\xfb\x01')
         user = self.queryLogin(self.conn, logins, connections)
-        print(user)
-        
+
         #disconnect check
         if(user == b""):
             self.conn.close()
