@@ -3,13 +3,6 @@ import re
 import socket
 import threading
 import datetime
-
-"""
-TODO: ADD ASCII ART
-TODO: ADD ANSI FLAIR
-TODO: FIGURE OUT THE MS TELNET ISSUES WITH ECHO SUPPRESSION
-TODO: IMPLEMENT DIRECT MESSAGING SYSTEM
-"""
        
 class client(threading.Thread):
     def __init__(self, conn, add, connections, logins, msgLog):
