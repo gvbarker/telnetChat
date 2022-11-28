@@ -169,6 +169,8 @@ class client(threading.Thread):
             lastChar = conn.recv(1024)
             if(lastChar.isascii() and not lastChar in arrowkeys):
                 received += lastChar
+            if(lastChar == b''):
+                return b''
             eol = received.find(b"\r\n")
             
             #disconnect check
