@@ -170,7 +170,11 @@ class client(threading.Thread):
             if(lastChar.isascii() and not lastChar in arrowkeys):
                 received += lastChar
             if(lastChar == b''):
-                return b''
+                print("disconnect")
+                tLock.acquire()
+                del connections[user.upper()]
+                tLock.release()
+                return
             eol = received.find(b"\r\n")
             
             #disconnect check
@@ -353,7 +357,7 @@ class client(threading.Thread):
 
 
 
-
+#running the server etc.
 
 HOSTADD = socket.gethostbyname(socket.gethostname())
 HOSTPORT = 4444
